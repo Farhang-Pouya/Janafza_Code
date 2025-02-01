@@ -1,45 +1,43 @@
 import streamlit as st
-import open3d as o3d
 import numpy as np
 import tempfile
 import os
+from stl import mesh
+import trimesh
 
-# Function to calculate similarity using point cloud distance
-def calculate_similarity(reference_cloud, target_cloud):
-    dist = reference_cloud.compute_point_cloud_distance(target_cloud)
-    return np.mean(dist)
+# Function to calculate similarity using point distances
+def calculate_similarity(reference_mesh, target_mesh):
+    ref_points = reference_mesh.vertices
+    target_points = target_mesh.vertices
+    distances = np.linalg.norm(ref_points[:, None] - target_points, axis=-1)
+    return np.mean(np.min(distances, axis=1))
 
-# Function to load STL file and convert to point cloud
-def load_stl_to_point_cloud(uploaded_file):
+# Function to load STL file and convert to mesh
+def load_stl_to_mesh(uploaded_file):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".stl") as temp_file:
         temp_file.write(uploaded_file.read())
         temp_filename = temp_file.name
-    
-    mesh = o3d.io.read_triangle_mesh(temp_filename)
-    
-    if not mesh.is_empty():
-        point_cloud = mesh.sample_points_uniformly(number_of_points=10000)
-    else:
-        st.error(f"Error: The STL file '{uploaded_file.name}' could not be loaded as a mesh.")
-    
+
+    stl_mesh = trimesh.load_mesh(temp_filename)
     os.remove(temp_filename)
-    return point_cloud
+    
+    return stl_mesh
 
 # Streamlit app
 def main():
-    logo_path = "logo.png"  # Ensure this file is in the same directory
+    logo_path = "logo.png"
     st.image(logo_path, use_container_width=True)
 
     st.title("DR. Janafza AI Cast Editor")
 
     st.sidebar.header("Upload Existing Patient's STL Files")
-    reference_files = st.sidebar.file_uploader("Required Format : STL", type=["stl"], accept_multiple_files=True)
+    reference_files = st.sidebar.file_uploader("Required Format: STL", type=["stl"], accept_multiple_files=True)
 
     st.sidebar.header("Upload _qaleb STL Files")
     qaleb_files = st.sidebar.file_uploader("Required Format: ..._qaleb.STL", type=["stl"], accept_multiple_files=True)
 
     st.sidebar.header("Upload New Patient's STL File")
-    new_file = st.sidebar.file_uploader("Required Format : STL", type=["stl"])
+    new_file = st.sidebar.file_uploader("Required Format: STL", type=["stl"])
 
     if st.button("Generate"):
         if not reference_files or not new_file or not qaleb_files:
@@ -47,13 +45,13 @@ def main():
             return
 
         st.write("Processing Existing Patient's STL Files...")
-        reference_point_clouds = []
+        reference_meshes = []
         reference_filenames = []
         qaleb_mapping = {}
 
         for ref_file in reference_files:
             try:
-                reference_point_clouds.append(load_stl_to_point_cloud(ref_file))
+                reference_meshes.append(load_stl_to_mesh(ref_file))
                 reference_filenames.append(ref_file.name)
                 qaleb_name = ref_file.name.replace(".stl", "_qaleb.stl")
                 qaleb_mapping[ref_file.name] = qaleb_name
@@ -64,15 +62,15 @@ def main():
 
         st.write("Processing the new patient's STL file...")
         try:
-            new_point_cloud = load_stl_to_point_cloud(new_file)
+            new_mesh = load_stl_to_mesh(new_file)
         except Exception as e:
             st.error(f"Failed to process new file {new_file.name}: {e}")
             return
 
         st.write("Generating the new STL file using Artificial Intelligence...")
         similarity_scores = []
-        for ref_cloud in reference_point_clouds:
-            score = calculate_similarity(ref_cloud, new_point_cloud)
+        for ref_mesh in reference_meshes:
+            score = calculate_similarity(ref_mesh, new_mesh)
             similarity_scores.append(score)
 
         most_similar_index = np.argmin(similarity_scores)
@@ -91,10 +89,9 @@ def main():
             temp_qaleb.write(qaleb_file.read())
             temp_qaleb_path = temp_qaleb.name
 
-        # st.write(f"### Most Similar File: `{most_similar_qaleb_file}`")
         st.write(f"### Similarity Score: `{most_similar_score:.4f}`")
         st.download_button(label="Download AI Generated File", data=open(temp_qaleb_path, "rb"), file_name=temp_qaleb_filename, mime="application/octet-stream")
-        
+
         os.remove(temp_qaleb_path)
 
 if __name__ == "__main__":
